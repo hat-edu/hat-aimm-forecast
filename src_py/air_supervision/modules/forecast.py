@@ -102,7 +102,6 @@ class ReadingsModule(hat.event.server.common.Module):
                 request_type = self._request_ids[event.payload.data.get('request_id')['instance']]
                 del self._request_ids[event.payload.data.get('request_id')['instance']]
 
-
                 if request_type == RETURN_TYPE.PREDICT:
                     return [
                         self._process_event(
@@ -156,7 +155,6 @@ class ReadingsSession(hat.event.server.common.ModuleSession):
                 result = self._module.process_aimm(event)
                 if result:
                     new_events.extend(result)
-
             else:
                 self._module.process_reading(event)
         return new_events

@@ -42,7 +42,7 @@ async def create(conf, engine):
     module._async_group = hat.aio.Group()
     module._engine = engine
 
-    module._model_ids = []
+    module._model_ids = {}
 
     module._model_id = None
     module._readings = []
@@ -100,56 +100,65 @@ class ReadingsModule(hat.event.server.common.Module):
 
             self._request_ids[events[0].event_id._asdict()['instance']] = RETURN_TYPE.FIT
 
+    def process_state(self, event):
+        self._model_ids = event.payload.data['models']
+        # self._model_ids = list(event.payload.data['models'].keys())
+
+        # self._model_id = util.first(event.payload.data['models'].keys())
+
+        # if len(self._model_ids):
+        #     self._model_id = self._model_ids[-1]
+
+        self.send_message(event, 'model_state')
+
+        # if self._request_type == RETURN_TYPE.PREDICT:
+        #     breakpoint()
+
+    def process_action(self, event):
+        if event.payload.data.get('request_id')['instance'] in self._request_ids \
+                and event.payload.data.get('status') == 'DONE':
+
+            # self._request_id = None
+            request_type = self._request_ids[event.payload.data.get('request_id')['instance']]
+            del self._request_ids[event.payload.data.get('request_id')['instance']]
+
+            if request_type == RETURN_TYPE.CREATE:
+                # self._model_ids[str(event.payload.data.get('result'))] = 'constant'
+                # self._model_id = str(event.payload.data.get('result'))
+
+                self._async_group.spawn(self.fit)
+
+
 
     def process_aimm(self, event):
 
+
         if event.event_type[1] == 'state':
-
-            self._model_ids = list(event.payload.data['models'].keys())
-
-            # self._model_id = util.first(event.payload.data['models'].keys())
-
-            if len(self._model_ids):
-                self._model_id = self._model_ids[-1]
-
-            self.send_message(event, 'model_state')
-
-            # if self._request_type == RETURN_TYPE.PREDICT:
-            #     breakpoint()
+            self.process_state(event)
 
         elif event.event_type[1] == 'action':
-
-            if event.payload.data.get('request_id')['instance'] in self._request_ids \
-                    and event.payload.data.get('status') == 'DONE':
-
-                # self._request_id = None
-                request_type = self._request_ids[event.payload.data.get('request_id')['instance']]
-                del self._request_ids[event.payload.data.get('request_id')['instance']]
-
-                if request_type == RETURN_TYPE.CREATE:
-                    self._model_id = str(event.payload.data.get('result'))
-
-                    self._async_group.spawn(self.fit)
-
-                # elif request_type == RETURN_TYPE.FIT and self._model_id:
-                #     pass
-
-
+            self.process_action(event)
 
     async def process_return(self, event):
 
         if 'model' in event.payload.data:
-            model_n = event.payload.data['model']
+            model_n = "air_supervision.aimm.model." + event.payload.data['model']
         else:
-            model_n = 'MultiOutputSVR'
+            model_n = "air_supervision.aimm.model." + 'MultiOutputSVR'
 
         async def create_instance():
+
+            for key, value in self._model_ids.items():
+                if value == model_n:
+                    self._model_id = key
+                    self._async_group.spawn(self.fit)
+                    return
 
             return_id = await self._engine.register(
                 self._source,
                 [_register_event(('aimm', 'create_instance'),
                                  {
-                                     'model_type': "air_supervision.aimm.model." + model_n,
+                                     'model_type': model_n,
                                      'args': [],
                                      'kwargs': {}
                                  }
