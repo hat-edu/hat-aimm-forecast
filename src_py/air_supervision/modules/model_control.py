@@ -1,28 +1,24 @@
 from hat import util
 import hat.aio
 import hat.event.server.common
-
+from aimm.client import repl
 from enum import Enum
+
+import sys
+import os
+
+sys.path.insert(0, '../../')
+import importlib
+from src_py.air_supervision.modules.SVR import MultiOutputSVR, constant
+from src_py.air_supervision.modules.generic_model import RETURN_TYPE
 
 import logging
 
-mlog = logging.getLogger(__name__)
 
+mlog = logging.getLogger(__name__)
 json_schema_id = None
 json_schema_repo = None
-
 _source_id = 0
-
-from aimm.client import repl
-import pandas
-import numpy
-
-
-
-class RETURN_TYPE(Enum):
-    PREDICT = 1
-    FIT = 2
-    CREATE = 3
 
 
 async def create(conf, engine):
@@ -38,15 +34,18 @@ async def create(conf, engine):
 
     module._subscription = hat.event.server.common.Subscription([
         ('aimm', '*'),
-        ('gui', 'backValue', '*')])
+        ('gui', 'system', 'timeseries', 'reading'),
+        ('backValue', 'backValue', '*')])
     module._async_group = hat.aio.Group()
     module._engine = engine
 
     module._model_ids = {}
 
-    module._model_id = None
+    module._current_model_name = None
     module._readings = []
     module._request_id = None
+
+    module._MODELS = {}
 
     module._request_ids = {}
 
@@ -76,100 +75,74 @@ class ReadingsModule(hat.event.server.common.Module):
 
         self._async_group.spawn(send_log_message)
 
-    async def fit(self):
-        if self._model_id:
-
-            df = pandas.read_csv('../../dataset/sanatized.csv')
-            goal = 'PT08.S1(CO)'
-            x, y = [], []
-            for i in range(48, len(df) - 24, 24):
-                x.append(df[goal][i - 48:i])
-                y.append(df[goal][i:i + 24])
-            x, y = numpy.array(x), numpy.array(y)
-
-            events = await self._engine.register(
-                self._source,
-                [_register_event(('aimm', 'fit', self._model_id),
-                                 {
-                                     'args': [x.tolist(), y.tolist()],
-                                     'kwargs': {
-
-                                     }
-                                 }
-                                 )])
-
-            self._request_ids[events[0].event_id._asdict()['instance']] = RETURN_TYPE.FIT
-
     def process_state(self, event):
-        self._model_ids = event.payload.data['models']
-        # self._model_ids = list(event.payload.data['models'].keys())
+        if not event.payload.data['models'] or not self._MODELS:
+            return
 
-        # self._model_id = util.first(event.payload.data['models'].keys())
-
-        # if len(self._model_ids):
-        #     self._model_id = self._model_ids[-1]
+        for model_id, model_name in event.payload.data['models'].items():
+            model_name = model_name.rsplit('.', 1)[-1]
+            for m_name, model_inst in self._MODELS.items():
+                if model_name == m_name:
+                    model_inst.set_id(model_id)
 
         self.send_message(event, 'model_state')
 
-        # if self._request_type == RETURN_TYPE.PREDICT:
-        #     breakpoint()
 
     def process_action(self, event):
-        if event.payload.data.get('request_id')['instance'] in self._request_ids \
+        if (request_instance := event.payload.data.get('request_id')['instance']) in self._request_ids \
                 and event.payload.data.get('status') == 'DONE':
 
-            # self._request_id = None
-            request_type = self._request_ids[event.payload.data.get('request_id')['instance']]
-            del self._request_ids[event.payload.data.get('request_id')['instance']]
+            request_type, model_name = self._request_ids[request_instance]
+            del self._request_ids[request_instance]
 
             if request_type == RETURN_TYPE.CREATE:
-                # self._model_ids[str(event.payload.data.get('result'))] = 'constant'
-                # self._model_id = str(event.payload.data.get('result'))
+                self._current_model_name = model_name
+                self._async_group.spawn(self._MODELS[model_name].fit)
 
-                self._async_group.spawn(self.fit)
+            if request_type == RETURN_TYPE.FIT:
+                pass
 
-
+            if request_type == RETURN_TYPE.PREDICT:
+                return [
+                    self._process_event(
+                        ('gui', 'system', 'timeseries', 'forecast'), v)
+                    for v in event.payload.data['result']]
 
     def process_aimm(self, event):
 
-
         if event.event_type[1] == 'state':
-            self.process_state(event)
+            return self.process_state(event)
 
         elif event.event_type[1] == 'action':
-            self.process_action(event)
+            return self.process_action(event)
 
-    async def process_return(self, event):
+    def process_reading(self, event):
+        self._readings += [event.payload.data]
 
+        if len(self._readings) == 48:
+            model_input = self._readings
+            self._readings = self._readings[:24]
+
+            if self._current_model_name:
+                self._async_group.spawn(self._MODELS[self._current_model_name].predict, [model_input])
+
+    def process_return(self, event):
+
+        model_n = 'MultiOutputSVR'
         if 'model' in event.payload.data:
-            model_n = "air_supervision.aimm.model." + event.payload.data['model']
-        else:
-            model_n = "air_supervision.aimm.model." + 'MultiOutputSVR'
+            model_n = event.payload.data['model']
 
-        async def create_instance():
+        # IGNORED ON FIRST RUN
+        for model_name, model_inst in self._MODELS.items():
+            if model_n == model_name:
+                self._current_model_name = model_name
+                return
 
-            for key, value in self._model_ids.items():
-                if value == model_n:
-                    self._model_id = key
-                    self._async_group.spawn(self.fit)
-                    return
+        MyClass = getattr(importlib.import_module("src_py.air_supervision.modules.SVR"), model_n)
 
-            return_id = await self._engine.register(
-                self._source,
-                [_register_event(('aimm', 'create_instance'),
-                                 {
-                                     'model_type': model_n,
-                                     'args': [],
-                                     'kwargs': {}
-                                 }
-                                 )])
+        self._MODELS[model_n] = MyClass(self)
 
-            self._request_ids[return_id[0].event_id._asdict()['instance']] = RETURN_TYPE.CREATE
-
-        self._async_group.spawn(create_instance)
-
-
-
+        self._async_group.spawn(self._MODELS[model_n].create_instance)
 
     def _process_event(self, event_type, payload, source_timestamp=None):
         return self._engine.create_process_event(
@@ -190,15 +163,19 @@ class ReadingsSession(hat.event.server.common.ModuleSession):
 
     async def process(self, changes):
         new_events = []
+
         for event in changes:
-            if event.event_type[0] == 'aimm':
-                result = self._module.process_aimm(event)
-                if result:
-                    new_events.extend(result)
-            elif event.event_type[1] == 'backValue':
-                await self._module.process_return(event)
-            else:
-                pass
+
+            result = {
+                'aimm': self._module.process_aimm,
+                'gui': self._module.process_reading,
+                'backValue': self._module.process_return
+
+            }[event.event_type[0]](event)
+
+            if result:
+                new_events.extend(result)
+
         return new_events
 
 

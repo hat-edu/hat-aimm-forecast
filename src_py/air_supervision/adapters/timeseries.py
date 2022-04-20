@@ -105,7 +105,7 @@ class Session(hat.gui.common.AdapterSession):
                     # sending data to module 'module'
                     self._adapter._event_client.register(([
                         hat.event.common.RegisterEvent(
-                            event_type=('gui', 'backValue', 'modelChange'),
+                            event_type=('backValue', 'backValue', 'modelChange'),
                             source_timestamp=None,
                             payload=hat.event.common.EventPayload(
                                 type=hat.event.common.EventPayloadType.JSON,
