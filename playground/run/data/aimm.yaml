@@ -30,7 +30,7 @@ control:
     action_state_event_type: ['aimm', 'action']
 plugins:
     names:
-        - 'air_supervision.aimm.model'
+        - 'air_supervision.aimm.regression_models'
 log:
     disable_existing_loggers: false
     formatters:

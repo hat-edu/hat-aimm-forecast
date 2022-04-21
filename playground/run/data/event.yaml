@@ -31,8 +31,7 @@ log:
 module_engine:
     modules:
       - module: air_supervision.modules.readings
-      - module: air_supervision.modules.model_control
-#      - module: air_supervision.modules.forecast
+      - module: air_supervision.modules.regression_control
       - module: air_supervision.modules.enable_all
 monitor:
     component_address: tcp+sbs://127.0.0.1:23012

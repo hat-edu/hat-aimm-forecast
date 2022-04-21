@@ -9,8 +9,8 @@ import os
 
 sys.path.insert(0, '../../')
 import importlib
-from src_py.air_supervision.modules.SVR import MultiOutputSVR, constant
-from src_py.air_supervision.modules.generic_model import RETURN_TYPE
+# from src_py.air_supervision.modules.SVR import MultiOutputSVR, constant
+from src_py.air_supervision.modules.regression_model_generic import RETURN_TYPE
 
 import logging
 
@@ -124,7 +124,7 @@ class ReadingsModule(hat.event.server.common.Module):
             self._readings = self._readings[:24]
 
             if self._current_model_name:
-                self._async_group.spawn(self._MODELS[self._current_model_name].predict, [model_input])
+                self._async_group.spawn(self._MODELS[self._current_model_name].predict, model_input)
 
     def process_return(self, event):
 
@@ -138,7 +138,7 @@ class ReadingsModule(hat.event.server.common.Module):
                 self._current_model_name = model_name
                 return
 
-        MyClass = getattr(importlib.import_module("src_py.air_supervision.modules.SVR"), model_n)
+        MyClass = getattr(importlib.import_module("src_py.air_supervision.modules.regression_models"), model_n)
 
         self._MODELS[model_n] = MyClass(self)
 

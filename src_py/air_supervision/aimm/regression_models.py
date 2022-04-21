@@ -39,7 +39,7 @@ class linear(aimm.plugins.Model):
         self._linear = LinearRegression()
 
     def fit(self, x, y):
-        self._linear = self._linear.fit(X, y)
+        self._linear = self._linear.fit(x, y)
         return self
 
     def predict(self, X):
@@ -67,6 +67,7 @@ class constant(aimm.plugins.Model):
 
     def predict(self, X):
         # return self._linear.predict(X)
+
         return [800] * len(X)
 
 
